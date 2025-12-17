@@ -1,0 +1,128 @@
+//Arduino code
+#include <SoftwareSerial.h>
+SoftwareSerial EspSerial(2, 3); // RX, TX (NodeMCU TX -> 2, Arduino 3 -> NodeMCU RX via divider)
+
+// Motor driver pins (L298N)
+#define ENA 5
+#define IN1 8
+#define IN2 9
+#define ENB 6
+#define IN3 10
+#define IN4 11
+
+// Sensors
+#define PIR_PIN 4
+#define TRIG_PIN 12
+#define ECHO_PIN 13
+#define GAS_PIN A0
+
+int GAS_THRESHOLD = 400;
+int OBSTACLE_DIST_CM = 20;
+int motorSpeed = 180; // 0–255 PWM
+
+unsigned long lastCmdTime = 0;
+const unsigned long timeoutMs = 2000; // stop motors if no cmd in 2 seconds
+
+void setup() {
+  EspSerial.begin(9600);
+  Serial.begin(9600);
+
+  // Motor pins
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // Sensor pins
+  pinMode(PIR_PIN, INPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(GAS_PIN, INPUT);
+
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+  stopMotors();
+
+  Serial.println("Arduino Ready for Commands + Sensors...");
+}
+
+void loop() {
+  // ===== SENSOR SECTION =====
+  int gasValue = analogRead(GAS_PIN);
+  int pirValue = digitalRead(PIR_PIN);
+
+  // Ultrasonic distance
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  int distance = duration * 0.034 / 2;
+
+  // Print all sensor readings on Arduino IDE
+  Serial.print("Gas: "); Serial.print(gasValue);
+  Serial.print(" | PIR: "); Serial.print(pirValue);
+  Serial.print(" | Distance: "); Serial.print(distance);
+  Serial.println(" cm");
+
+  // ===== ALERT SIGNALS TO NodeMCU =====
+  if (gasValue > GAS_THRESHOLD) EspSerial.println("GAS");
+  if (pirValue == HIGH) EspSerial.println("MOTION");
+  if (distance > 0 && distance < OBSTACLE_DIST_CM) EspSerial.println("OBSTACLE");
+
+  // Send sensor data line to NodeMCU
+  EspSerial.print("DATA:");
+  EspSerial.print(gasValue); EspSerial.print(",");
+  EspSerial.print(pirValue); EspSerial.print(",");
+  EspSerial.println(distance);
+
+  delay(500); // Small delay to stabilize sensor updates
+
+  // ===== MOTOR COMMAND SECTION =====
+  if (EspSerial.available()) {
+    char cmd = EspSerial.read();
+    lastCmdTime = millis();
+    Serial.print("Command: "); Serial.println(cmd);
+    executeCommand(cmd);
+  }
+
+  // Auto-stop if no command for timeoutMs
+  if (millis() - lastCmdTime > timeoutMs) {
+    stopMotors();
+  }
+}
+
+// ===== MOTOR FUNCTIONS =====
+void executeCommand(char c) {
+  switch (c) {
+    case 'F': moveForward(); break;
+    case 'B': moveBackward(); break;
+    case 'L': turnLeft(); break;
+    case 'R': turnRight(); break;
+    case 'S': stopMotors(); break;
+  }
+}
+
+void moveForward() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+void moveBackward() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+void turnLeft() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+void turnRight() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+void stopMotors() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}

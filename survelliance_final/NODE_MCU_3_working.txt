@@ -1,0 +1,79 @@
+
+#define BLYNK_TEMPLATE_ID "[Enter your template id]"
+#define BLYNK_TEMPLATE_NAME "[Enter your template  name]"
+#define BLYNK_AUTH_TOKEN "[Enter your blynk authentication token]"
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <SoftwareSerial.h>
+#include <Blynk.h>
+
+char auth[] = "[Enter your blynk authentication token]";
+char ssid[] = "[YOUR SSID]";
+char pass[] = "[YOUR WIFI PASSWORD]";
+
+// Software serial for Arduino communication
+SoftwareSerial ArduinoSerial(D5, D6); // RX, TX (D5=GPIO14, D6=GPIO12)
+
+void setup() {
+  Serial.begin(115200);        // USB Serial Monitor
+  ArduinoSerial.begin(9600);   // match Arduino baud
+  Blynk.begin(auth, ssid, pass);
+
+  Serial.println("NodeMCU ready. Waiting for Arduino data...");
+}
+
+// ====== Blynk button handlers ======
+BLYNK_WRITE(V0) { if (param.asInt()) ArduinoSerial.write('F'); }
+BLYNK_WRITE(V1) { if (param.asInt()) ArduinoSerial.write('B'); }
+BLYNK_WRITE(V2) { if (param.asInt()) ArduinoSerial.write('L'); }
+BLYNK_WRITE(V3) { if (param.asInt()) ArduinoSerial.write('R'); }
+BLYNK_WRITE(V4) { if (param.asInt()) ArduinoSerial.write('S'); }
+
+void loop() {
+  Blynk.run();
+  readFromArduino();
+}
+
+// ====== Read sensor data from Arduino ======
+void readFromArduino() {
+  if (!ArduinoSerial.available()) return;
+
+  String data = ArduinoSerial.readStringUntil('\n');
+  data.trim();
+
+  // Print raw line on Serial Monitor
+  Serial.print("[RAW RX] ");
+  Serial.println(data);
+
+  if (data.startsWith("DATA:")) {
+    data.remove(0,5);
+    int gas = data.substring(0, data.indexOf(',')).toInt();
+    int pir = data.substring(data.indexOf(',')+1, data.lastIndexOf(',')).toInt();
+    int dist = data.substring(data.lastIndexOf(',')+1).toInt();
+
+    // Debug print
+    Serial.print("[PARSED] Gas="); Serial.print(gas);
+    Serial.print("  PIR="); Serial.print(pir);
+    Serial.print("  Dist="); Serial.println(dist);
+
+    // Send to Blynk
+    Blynk.virtualWrite(V9, gas);
+    Blynk.virtualWrite(V10, dist);
+    Blynk.virtualWrite(V6, gas>400?255:0);
+    Blynk.virtualWrite(V7, pir?255:0);
+    Blynk.virtualWrite(V8, (dist>0 && dist<20)?255:0);
+  }
+  else if (data.startsWith("GAS")) {
+    Serial.println("[EVENT] Gas alert");
+    Blynk.logEvent("gas_alert","🚨 Gas Detected!");
+  }
+  else if (data.startsWith("MOTION")) {
+    Serial.println("[EVENT] Motion alert");
+    Blynk.logEvent("motion_alert","⚠ Motion Detected!");
+  }
+  else if (data.startsWith("OBSTACLE")) {
+    Serial.println("[EVENT] Obstacle alert");
+    Blynk.logEvent("obstacle_alert","🧱 Obstacle Detected!");
+  }
+}
